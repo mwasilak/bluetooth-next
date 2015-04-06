@@ -76,7 +76,6 @@ nla_put_failure:
 	nlmsg_free(msg);
 	return -ENOBUFS;
 }
-EXPORT_SYMBOL(ieee802154_nl_start_confirm);
 
 static int ieee802154_nl_fill_iface(struct sk_buff *msg, u32 portid,
 				    u32 seq, int flags, struct net_device *dev)
@@ -136,7 +135,8 @@ static int ieee802154_nl_fill_iface(struct sk_buff *msg, u32 portid,
 	}
 
 	wpan_phy_put(phy);
-	return genlmsg_end(msg, hdr);
+	genlmsg_end(msg, hdr);
+	return 0;
 
 nla_put_failure:
 	wpan_phy_put(phy);

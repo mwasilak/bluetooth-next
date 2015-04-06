@@ -414,7 +414,7 @@ enum cb_status {
 
 /**
  * cb_command - Command Block flags
- * @cb_tx_nc:  0: controler does CRC (normal),  1: CRC from skb memory
+ * @cb_tx_nc:  0: controller does CRC (normal),  1: CRC from skb memory
  */
 enum cb_command {
 	cb_nop    = 0x0000,
@@ -1543,7 +1543,7 @@ static int e100_phy_init(struct nic *nic)
 		mdio_write(netdev, nic->mii.phy_id, MII_BMCR, bmcr);
 	} else if ((nic->mac >= mac_82550_D102) || ((nic->flags & ich) &&
 	   (mdio_read(netdev, nic->mii.phy_id, MII_TPISTATUS) & 0x8000) &&
-		!(nic->eeprom[eeprom_cnfg_mdix] & eeprom_mdix_enabled))) {
+		(nic->eeprom[eeprom_cnfg_mdix] & eeprom_mdix_enabled))) {
 		/* enable/disable MDI/MDI-X auto-switching. */
 		mdio_write(netdev, nic->mii.phy_id, MII_NCONFIG,
 				nic->mii.force_media ? 0 : NCONFIG_AUTO_SWITCH);

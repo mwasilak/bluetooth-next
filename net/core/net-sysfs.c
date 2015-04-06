@@ -23,6 +23,7 @@
 #include <linux/export.h>
 #include <linux/jiffies.h>
 #include <linux/pm_runtime.h>
+#include <linux/of.h>
 
 #include "net-sysfs.h"
 
@@ -614,8 +615,7 @@ static ssize_t show_rps_map(struct netdev_rx_queue *queue,
 {
 	struct rps_map *map;
 	cpumask_var_t mask;
-	size_t len = 0;
-	int i;
+	int i, len;
 
 	if (!zalloc_cpumask_var(&mask, GFP_KERNEL))
 		return -ENOMEM;
@@ -626,17 +626,11 @@ static ssize_t show_rps_map(struct netdev_rx_queue *queue,
 		for (i = 0; i < map->len; i++)
 			cpumask_set_cpu(map->cpus[i], mask);
 
-	len += cpumask_scnprintf(buf + len, PAGE_SIZE, mask);
-	if (PAGE_SIZE - len < 3) {
-		rcu_read_unlock();
-		free_cpumask_var(mask);
-		return -EINVAL;
-	}
+	len = snprintf(buf, PAGE_SIZE, "%*pb\n", cpumask_pr_args(mask));
 	rcu_read_unlock();
-
 	free_cpumask_var(mask);
-	len += sprintf(buf + len, "\n");
-	return len;
+
+	return len < PAGE_SIZE ? len : -EINVAL;
 }
 
 static ssize_t store_rps_map(struct netdev_rx_queue *queue,
@@ -1090,8 +1084,7 @@ static ssize_t show_xps_map(struct netdev_queue *queue,
 	struct xps_dev_maps *dev_maps;
 	cpumask_var_t mask;
 	unsigned long index;
-	size_t len = 0;
-	int i;
+	int i, len;
 
 	if (!zalloc_cpumask_var(&mask, GFP_KERNEL))
 		return -ENOMEM;
@@ -1117,15 +1110,9 @@ static ssize_t show_xps_map(struct netdev_queue *queue,
 	}
 	rcu_read_unlock();
 
-	len += cpumask_scnprintf(buf + len, PAGE_SIZE, mask);
-	if (PAGE_SIZE - len < 3) {
-		free_cpumask_var(mask);
-		return -EINVAL;
-	}
-
+	len = snprintf(buf, PAGE_SIZE, "%*pb\n", cpumask_pr_args(mask));
 	free_cpumask_var(mask);
-	len += sprintf(buf + len, "\n");
-	return len;
+	return len < PAGE_SIZE ? len : -EINVAL;
 }
 
 static ssize_t store_xps_map(struct netdev_queue *queue,
@@ -1387,6 +1374,30 @@ static struct class net_class = {
 	.ns_type = &net_ns_type_operations,
 	.namespace = net_namespace,
 };
+
+#ifdef CONFIG_OF_NET
+static int of_dev_node_match(struct device *dev, const void *data)
+{
+	int ret = 0;
+
+	if (dev->parent)
+		ret = dev->parent->of_node == data;
+
+	return ret == 0 ? dev->of_node == data : ret;
+}
+
+struct net_device *of_find_net_device_by_node(struct device_node *np)
+{
+	struct device *dev;
+
+	dev = class_find_device(&net_class, NULL, np, of_dev_node_match);
+	if (!dev)
+		return NULL;
+
+	return to_net_dev(dev);
+}
+EXPORT_SYMBOL(of_find_net_device_by_node);
+#endif
 
 /* Delete sysfs entries but hold kobject reference until after all
  * netdev references are gone.

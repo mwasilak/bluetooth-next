@@ -34,6 +34,7 @@
 #define SD8797_DEFAULT_FW_NAME "mrvl/sd8797_uapsta.bin"
 #define SD8897_DEFAULT_FW_NAME "mrvl/sd8897_uapsta.bin"
 #define SD8887_DEFAULT_FW_NAME "mrvl/sd8887_uapsta.bin"
+#define SD8801_DEFAULT_FW_NAME "mrvl/sd8801_uapsta.bin"
 
 #define BLOCK_MODE	1
 #define BYTE_MODE	0
@@ -43,6 +44,9 @@
 #define MWIFIEX_SDIO_IO_PORT_MASK		0xfffff
 
 #define MWIFIEX_SDIO_BYTE_MODE_MASK	0x80000000
+
+#define MWIFIEX_MAX_FUNC2_REG_NUM	13
+#define MWIFIEX_SDIO_SCRATCH_SIZE	10
 
 #define SDIO_MPA_ADDR_BASE		0x1000
 #define CTRL_PORT			0
@@ -219,6 +223,11 @@ struct mwifiex_sdio_card_reg {
 	u8 fw_dump_ctrl;
 	u8 fw_dump_start;
 	u8 fw_dump_end;
+	u8 func1_dump_reg_start;
+	u8 func1_dump_reg_end;
+	u8 func1_scratch_reg;
+	u8 func1_spec_reg_num;
+	u8 func1_spec_reg_table[MWIFIEX_MAX_FUNC2_REG_NUM];
 };
 
 struct sdio_mmc_card {
@@ -229,9 +238,6 @@ struct sdio_mmc_card {
 	const struct mwifiex_sdio_card_reg *reg;
 	u8 max_ports;
 	u8 mp_agg_pkt_limit;
-	bool supports_sdio_new_mode;
-	bool has_control_mask;
-	bool supports_fw_dump;
 	u16 tx_buf_size;
 	u32 mp_tx_agg_buf_size;
 	u32 mp_rx_agg_buf_size;
@@ -246,7 +252,11 @@ struct sdio_mmc_card {
 	u8 curr_wr_port;
 
 	u8 *mp_regs;
-	u8 auto_tdls;
+	bool supports_sdio_new_mode;
+	bool has_control_mask;
+	bool can_dump_fw;
+	bool can_auto_tdls;
+	bool can_ext_scan;
 
 	struct mwifiex_sdio_mpa_tx mpa_tx;
 	struct mwifiex_sdio_mpa_rx mpa_rx;
@@ -257,13 +267,14 @@ struct mwifiex_sdio_device {
 	const struct mwifiex_sdio_card_reg *reg;
 	u8 max_ports;
 	u8 mp_agg_pkt_limit;
-	bool supports_sdio_new_mode;
-	bool has_control_mask;
-	bool supports_fw_dump;
 	u16 tx_buf_size;
 	u32 mp_tx_agg_buf_size;
 	u32 mp_rx_agg_buf_size;
-	u8 auto_tdls;
+	bool supports_sdio_new_mode;
+	bool has_control_mask;
+	bool can_dump_fw;
+	bool can_auto_tdls;
+	bool can_ext_scan;
 };
 
 static const struct mwifiex_sdio_card_reg mwifiex_reg_sd87xx = {
@@ -291,6 +302,11 @@ static const struct mwifiex_sdio_card_reg mwifiex_reg_sd87xx = {
 	.rd_len_p0_l = 0x08,
 	.rd_len_p0_u = 0x09,
 	.card_misc_cfg_reg = 0x6c,
+	.func1_dump_reg_start = 0x0,
+	.func1_dump_reg_end = 0x9,
+	.func1_scratch_reg = 0x60,
+	.func1_spec_reg_num = 5,
+	.func1_spec_reg_table = {0x28, 0x30, 0x34, 0x38, 0x3c},
 };
 
 static const struct mwifiex_sdio_card_reg mwifiex_reg_sd8897 = {
@@ -335,6 +351,12 @@ static const struct mwifiex_sdio_card_reg mwifiex_reg_sd8897 = {
 	.fw_dump_ctrl = 0xe2,
 	.fw_dump_start = 0xe3,
 	.fw_dump_end = 0xea,
+	.func1_dump_reg_start = 0x0,
+	.func1_dump_reg_end = 0xb,
+	.func1_scratch_reg = 0xc0,
+	.func1_spec_reg_num = 8,
+	.func1_spec_reg_table = {0x4C, 0x50, 0x54, 0x55, 0x58,
+				 0x59, 0x5c, 0x5d},
 };
 
 static const struct mwifiex_sdio_card_reg mwifiex_reg_sd8887 = {
@@ -376,6 +398,13 @@ static const struct mwifiex_sdio_card_reg mwifiex_reg_sd8887 = {
 	.cmd_cfg_1 = 0xc5,
 	.cmd_cfg_2 = 0xc6,
 	.cmd_cfg_3 = 0xc7,
+	.func1_dump_reg_start = 0x10,
+	.func1_dump_reg_end = 0x17,
+	.func1_scratch_reg = 0x90,
+	.func1_spec_reg_num = 13,
+	.func1_spec_reg_table = {0x08, 0x58, 0x5C, 0x5D, 0x60,
+				 0x61, 0x62, 0x64, 0x65, 0x66,
+				 0x68, 0x69, 0x6a},
 };
 
 static const struct mwifiex_sdio_device mwifiex_sdio_sd8786 = {
@@ -383,13 +412,14 @@ static const struct mwifiex_sdio_device mwifiex_sdio_sd8786 = {
 	.reg = &mwifiex_reg_sd87xx,
 	.max_ports = 16,
 	.mp_agg_pkt_limit = 8,
-	.supports_sdio_new_mode = false,
-	.has_control_mask = true,
 	.tx_buf_size = MWIFIEX_TX_DATA_BUF_SIZE_2K,
 	.mp_tx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_16K,
 	.mp_rx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_16K,
-	.supports_fw_dump = false,
-	.auto_tdls = false,
+	.supports_sdio_new_mode = false,
+	.has_control_mask = true,
+	.can_dump_fw = false,
+	.can_auto_tdls = false,
+	.can_ext_scan = false,
 };
 
 static const struct mwifiex_sdio_device mwifiex_sdio_sd8787 = {
@@ -397,17 +427,63 @@ static const struct mwifiex_sdio_device mwifiex_sdio_sd8787 = {
 	.reg = &mwifiex_reg_sd87xx,
 	.max_ports = 16,
 	.mp_agg_pkt_limit = 8,
-	.supports_sdio_new_mode = false,
-	.has_control_mask = true,
 	.tx_buf_size = MWIFIEX_TX_DATA_BUF_SIZE_2K,
 	.mp_tx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_16K,
 	.mp_rx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_16K,
-	.supports_fw_dump = false,
-	.auto_tdls = false,
+	.supports_sdio_new_mode = false,
+	.has_control_mask = true,
+	.can_dump_fw = false,
+	.can_auto_tdls = false,
+	.can_ext_scan = true,
 };
 
 static const struct mwifiex_sdio_device mwifiex_sdio_sd8797 = {
 	.firmware = SD8797_DEFAULT_FW_NAME,
+	.reg = &mwifiex_reg_sd87xx,
+	.max_ports = 16,
+	.mp_agg_pkt_limit = 8,
+	.tx_buf_size = MWIFIEX_TX_DATA_BUF_SIZE_2K,
+	.mp_tx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_16K,
+	.mp_rx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_16K,
+	.supports_sdio_new_mode = false,
+	.has_control_mask = true,
+	.can_dump_fw = false,
+	.can_auto_tdls = false,
+	.can_ext_scan = true,
+};
+
+static const struct mwifiex_sdio_device mwifiex_sdio_sd8897 = {
+	.firmware = SD8897_DEFAULT_FW_NAME,
+	.reg = &mwifiex_reg_sd8897,
+	.max_ports = 32,
+	.mp_agg_pkt_limit = 16,
+	.tx_buf_size = MWIFIEX_TX_DATA_BUF_SIZE_4K,
+	.mp_tx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_32K,
+	.mp_rx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_32K,
+	.supports_sdio_new_mode = true,
+	.has_control_mask = false,
+	.can_dump_fw = true,
+	.can_auto_tdls = false,
+	.can_ext_scan = true,
+};
+
+static const struct mwifiex_sdio_device mwifiex_sdio_sd8887 = {
+	.firmware = SD8887_DEFAULT_FW_NAME,
+	.reg = &mwifiex_reg_sd8887,
+	.max_ports = 32,
+	.mp_agg_pkt_limit = 16,
+	.tx_buf_size = MWIFIEX_TX_DATA_BUF_SIZE_2K,
+	.mp_tx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_32K,
+	.mp_rx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_32K,
+	.supports_sdio_new_mode = true,
+	.has_control_mask = false,
+	.can_dump_fw = false,
+	.can_auto_tdls = true,
+	.can_ext_scan = true,
+};
+
+static const struct mwifiex_sdio_device mwifiex_sdio_sd8801 = {
+	.firmware = SD8801_DEFAULT_FW_NAME,
 	.reg = &mwifiex_reg_sd87xx,
 	.max_ports = 16,
 	.mp_agg_pkt_limit = 8,
@@ -416,36 +492,9 @@ static const struct mwifiex_sdio_device mwifiex_sdio_sd8797 = {
 	.tx_buf_size = MWIFIEX_TX_DATA_BUF_SIZE_2K,
 	.mp_tx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_16K,
 	.mp_rx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_16K,
-	.supports_fw_dump = false,
-	.auto_tdls = false,
-};
-
-static const struct mwifiex_sdio_device mwifiex_sdio_sd8897 = {
-	.firmware = SD8897_DEFAULT_FW_NAME,
-	.reg = &mwifiex_reg_sd8897,
-	.max_ports = 32,
-	.mp_agg_pkt_limit = 16,
-	.supports_sdio_new_mode = true,
-	.has_control_mask = false,
-	.tx_buf_size = MWIFIEX_TX_DATA_BUF_SIZE_4K,
-	.mp_tx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_32K,
-	.mp_rx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_32K,
-	.supports_fw_dump = true,
-	.auto_tdls = false,
-};
-
-static const struct mwifiex_sdio_device mwifiex_sdio_sd8887 = {
-	.firmware = SD8887_DEFAULT_FW_NAME,
-	.reg = &mwifiex_reg_sd8887,
-	.max_ports = 32,
-	.mp_agg_pkt_limit = 16,
-	.supports_sdio_new_mode = true,
-	.has_control_mask = false,
-	.tx_buf_size = MWIFIEX_TX_DATA_BUF_SIZE_4K,
-	.mp_tx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_32K,
-	.mp_rx_agg_buf_size = MWIFIEX_MP_AGGR_BUF_SIZE_32K,
-	.supports_fw_dump = false,
-	.auto_tdls = true,
+	.can_dump_fw = false,
+	.can_auto_tdls = false,
+	.can_ext_scan = true,
 };
 
 /*

@@ -28,6 +28,54 @@
 
 #include "hci_debugfs.h"
 
+#define DEFINE_QUIRK_ATTRIBUTE(__name, __quirk)				      \
+static ssize_t __name ## _read(struct file *file,			      \
+				char __user *user_buf,			      \
+				size_t count, loff_t *ppos)		      \
+{									      \
+	struct hci_dev *hdev = file->private_data;			      \
+	char buf[3];							      \
+									      \
+	buf[0] = test_bit(__quirk, &hdev->quirks) ? 'Y' : 'N';		      \
+	buf[1] = '\n';							      \
+	buf[2] = '\0';							      \
+	return simple_read_from_buffer(user_buf, count, ppos, buf, 2);	      \
+}									      \
+									      \
+static ssize_t __name ## _write(struct file *file,			      \
+				 const char __user *user_buf,		      \
+				 size_t count, loff_t *ppos)		      \
+{									      \
+	struct hci_dev *hdev = file->private_data;			      \
+	char buf[32];							      \
+	size_t buf_size = min(count, (sizeof(buf) - 1));		      \
+	bool enable;							      \
+									      \
+	if (test_bit(HCI_UP, &hdev->flags))				      \
+		return -EBUSY;						      \
+									      \
+	if (copy_from_user(buf, user_buf, buf_size))			      \
+		return -EFAULT;						      \
+									      \
+	buf[buf_size] = '\0';						      \
+	if (strtobool(buf, &enable))					      \
+		return -EINVAL;						      \
+									      \
+	if (enable == test_bit(__quirk, &hdev->quirks))			      \
+		return -EALREADY;					      \
+									      \
+	change_bit(__quirk, &hdev->quirks);				      \
+									      \
+	return count;							      \
+}									      \
+									      \
+static const struct file_operations __name ## _fops = {			      \
+	.open		= simple_open,					      \
+	.read		= __name ## _read,				      \
+	.write		= __name ## _write,				      \
+	.llseek		= default_llseek,				      \
+}									      \
+
 static int features_show(struct seq_file *f, void *ptr)
 {
 	struct hci_dev *hdev = f->private;
@@ -61,6 +109,30 @@ static int features_open(struct inode *inode, struct file *file)
 
 static const struct file_operations features_fops = {
 	.open		= features_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static int device_id_show(struct seq_file *f, void *ptr)
+{
+	struct hci_dev *hdev = f->private;
+
+	hci_dev_lock(hdev);
+	seq_printf(f, "%4.4x:%4.4x:%4.4x:%4.4x\n", hdev->devid_source,
+		  hdev->devid_vendor, hdev->devid_product, hdev->devid_version);
+	hci_dev_unlock(hdev);
+
+	return 0;
+}
+
+static int device_id_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, device_id_show, inode->i_private);
+}
+
+static const struct file_operations device_id_fops = {
+	.open		= device_id_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
 	.release	= single_release,
@@ -156,6 +228,35 @@ static const struct file_operations uuids_fops = {
 	.release	= single_release,
 };
 
+static int remote_oob_show(struct seq_file *f, void *ptr)
+{
+	struct hci_dev *hdev = f->private;
+	struct oob_data *data;
+
+	hci_dev_lock(hdev);
+	list_for_each_entry(data, &hdev->remote_oob_data, list) {
+		seq_printf(f, "%pMR (type %u) %u %*phN %*phN %*phN %*phN\n",
+			   &data->bdaddr, data->bdaddr_type, data->present,
+			   16, data->hash192, 16, data->rand192,
+			   16, data->hash256, 16, data->rand256);
+	}
+	hci_dev_unlock(hdev);
+
+	return 0;
+}
+
+static int remote_oob_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, remote_oob_show, inode->i_private);
+}
+
+static const struct file_operations remote_oob_fops = {
+	.open		= remote_oob_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static int conn_info_min_age_set(void *data, u64 val)
 {
 	struct hci_dev *hdev = data;
@@ -212,13 +313,31 @@ static int conn_info_max_age_get(void *data, u64 *val)
 DEFINE_SIMPLE_ATTRIBUTE(conn_info_max_age_fops, conn_info_max_age_get,
 			conn_info_max_age_set, "%llu\n");
 
+static ssize_t use_debug_keys_read(struct file *file, char __user *user_buf,
+				   size_t count, loff_t *ppos)
+{
+	struct hci_dev *hdev = file->private_data;
+	char buf[3];
+
+	buf[0] = hci_dev_test_flag(hdev, HCI_USE_DEBUG_KEYS) ? 'Y': 'N';
+	buf[1] = '\n';
+	buf[2] = '\0';
+	return simple_read_from_buffer(user_buf, count, ppos, buf, 2);
+}
+
+static const struct file_operations use_debug_keys_fops = {
+	.open		= simple_open,
+	.read		= use_debug_keys_read,
+	.llseek		= default_llseek,
+};
+
 static ssize_t sc_only_mode_read(struct file *file, char __user *user_buf,
 				 size_t count, loff_t *ppos)
 {
 	struct hci_dev *hdev = file->private_data;
 	char buf[3];
 
-	buf[0] = test_bit(HCI_SC_ONLY, &hdev->dev_flags) ? 'Y': 'N';
+	buf[0] = hci_dev_test_flag(hdev, HCI_SC_ONLY) ? 'Y': 'N';
 	buf[1] = '\n';
 	buf[2] = '\0';
 	return simple_read_from_buffer(user_buf, count, ppos, buf, 2);
@@ -238,16 +357,27 @@ void hci_debugfs_create_common(struct hci_dev *hdev)
 			   &hdev->manufacturer);
 	debugfs_create_u8("hci_version", 0444, hdev->debugfs, &hdev->hci_ver);
 	debugfs_create_u16("hci_revision", 0444, hdev->debugfs, &hdev->hci_rev);
+	debugfs_create_u8("hardware_error", 0444, hdev->debugfs,
+			  &hdev->hw_error_code);
+	debugfs_create_file("device_id", 0444, hdev->debugfs, hdev,
+			    &device_id_fops);
+
 	debugfs_create_file("device_list", 0444, hdev->debugfs, hdev,
 			    &device_list_fops);
 	debugfs_create_file("blacklist", 0444, hdev->debugfs, hdev,
 			    &blacklist_fops);
 	debugfs_create_file("uuids", 0444, hdev->debugfs, hdev, &uuids_fops);
+	debugfs_create_file("remote_oob", 0400, hdev->debugfs, hdev,
+			    &remote_oob_fops);
 
 	debugfs_create_file("conn_info_min_age", 0644, hdev->debugfs, hdev,
 			    &conn_info_min_age_fops);
 	debugfs_create_file("conn_info_max_age", 0644, hdev->debugfs, hdev,
 			    &conn_info_max_age_fops);
+
+	if (lmp_ssp_capable(hdev) || lmp_le_capable(hdev))
+		debugfs_create_file("use_debug_keys", 0444, hdev->debugfs,
+				    hdev, &use_debug_keys_fops);
 
 	if (lmp_sc_capable(hdev) || lmp_le_capable(hdev))
 		debugfs_create_file("sc_only_mode", 0444, hdev->debugfs,
@@ -353,6 +483,24 @@ static int voice_setting_get(void *data, u64 *val)
 
 DEFINE_SIMPLE_ATTRIBUTE(voice_setting_fops, voice_setting_get,
 			NULL, "0x%4.4llx\n");
+
+static ssize_t ssp_debug_mode_read(struct file *file, char __user *user_buf,
+				   size_t count, loff_t *ppos)
+{
+	struct hci_dev *hdev = file->private_data;
+	char buf[3];
+
+	buf[0] = hdev->ssp_debug_mode ? 'Y': 'N';
+	buf[1] = '\n';
+	buf[2] = '\0';
+	return simple_read_from_buffer(user_buf, count, ppos, buf, 2);
+}
+
+static const struct file_operations ssp_debug_mode_fops = {
+	.open		= simple_open,
+	.read		= ssp_debug_mode_read,
+	.llseek		= default_llseek,
+};
 
 static int auto_accept_delay_set(void *data, u64 val)
 {
@@ -474,9 +622,12 @@ void hci_debugfs_create_bredr(struct hci_dev *hdev)
 	debugfs_create_file("voice_setting", 0444, hdev->debugfs, hdev,
 			    &voice_setting_fops);
 
-	if (lmp_ssp_capable(hdev))
+	if (lmp_ssp_capable(hdev)) {
+		debugfs_create_file("ssp_debug_mode", 0444, hdev->debugfs,
+				    hdev, &ssp_debug_mode_fops);
 		debugfs_create_file("auto_accept_delay", 0644, hdev->debugfs,
 				    hdev, &auto_accept_delay_fops);
+	}
 
 	if (lmp_sniff_capable(hdev)) {
 		debugfs_create_file("idle_timeout", 0644, hdev->debugfs,
@@ -602,7 +753,7 @@ static ssize_t force_static_address_read(struct file *file,
 	struct hci_dev *hdev = file->private_data;
 	char buf[3];
 
-	buf[0] = test_bit(HCI_FORCE_STATIC_ADDR, &hdev->dbg_flags) ? 'Y': 'N';
+	buf[0] = hci_dev_test_flag(hdev, HCI_FORCE_STATIC_ADDR) ? 'Y': 'N';
 	buf[1] = '\n';
 	buf[2] = '\0';
 	return simple_read_from_buffer(user_buf, count, ppos, buf, 2);
@@ -627,10 +778,10 @@ static ssize_t force_static_address_write(struct file *file,
 	if (strtobool(buf, &enable))
 		return -EINVAL;
 
-	if (enable == test_bit(HCI_FORCE_STATIC_ADDR, &hdev->dbg_flags))
+	if (enable == hci_dev_test_flag(hdev, HCI_FORCE_STATIC_ADDR))
 		return -EALREADY;
 
-	change_bit(HCI_FORCE_STATIC_ADDR, &hdev->dbg_flags);
+	hci_dev_change_flag(hdev, HCI_FORCE_STATIC_ADDR);
 
 	return count;
 }
@@ -920,6 +1071,11 @@ static int adv_max_interval_get(void *data, u64 *val)
 DEFINE_SIMPLE_ATTRIBUTE(adv_max_interval_fops, adv_max_interval_get,
 			adv_max_interval_set, "%llu\n");
 
+DEFINE_QUIRK_ATTRIBUTE(quirk_strict_duplicate_filter,
+		       HCI_QUIRK_STRICT_DUPLICATE_FILTER);
+DEFINE_QUIRK_ATTRIBUTE(quirk_simultaneous_discovery,
+		       HCI_QUIRK_SIMULTANEOUS_DISCOVERY);
+
 void hci_debugfs_create_le(struct hci_dev *hdev)
 {
 	debugfs_create_file("identity", 0400, hdev->debugfs, hdev,
@@ -964,6 +1120,13 @@ void hci_debugfs_create_le(struct hci_dev *hdev)
 			    &adv_max_interval_fops);
 	debugfs_create_u16("discov_interleaved_timeout", 0644, hdev->debugfs,
 			   &hdev->discov_interleaved_timeout);
+
+	debugfs_create_file("quirk_strict_duplicate_filter", 0644,
+			    hdev->debugfs, hdev,
+			    &quirk_strict_duplicate_filter_fops);
+	debugfs_create_file("quirk_simultaneous_discovery", 0644,
+			    hdev->debugfs, hdev,
+			    &quirk_simultaneous_discovery_fops);
 }
 
 void hci_debugfs_create_conn(struct hci_conn *conn)
