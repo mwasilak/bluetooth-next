@@ -143,6 +143,9 @@ struct in6_flowlabel_req {
 #define IPV6_TLV_PAD1		0
 #define IPV6_TLV_PADN		1
 #define IPV6_TLV_ROUTERALERT	5
+#ifdef CONFIG_IPV6_RPL
+#define IPV6_TLV_RPL		99
+#endif
 #define IPV6_TLV_JUMBO		194
 #define IPV6_TLV_HAO		201	/* home address option */
 

@@ -557,6 +557,17 @@ static bool ipv6_hop_ra(struct sk_buff *skb, int optoff)
 	return false;
 }
 
+#ifdef CONFIG_IPV6_RPL
+static bool ipv6_hop_rpl(struct sk_buff *skb, int optoff)
+{
+	/*
+	 * This is a fake RPL hop-by-hop header parser. For DODAG
+	 * root it should be acceptable as a temporary solution.
+	 */
+	return true;
+}
+#endif
+
 /* Jumbo payload */
 
 static bool ipv6_hop_jumbo(struct sk_buff *skb, int optoff)
@@ -608,6 +619,12 @@ static const struct tlvtype_proc tlvprochopopt_lst[] = {
 		.type	= IPV6_TLV_ROUTERALERT,
 		.func	= ipv6_hop_ra,
 	},
+#ifdef CONFIG_IPV6_RPL
+	{
+		.type	= IPV6_TLV_RPL,
+		.func	= ipv6_hop_rpl,
+	},
+#endif
 	{
 		.type	= IPV6_TLV_JUMBO,
 		.func	= ipv6_hop_jumbo,
